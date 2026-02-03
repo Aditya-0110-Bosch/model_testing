@@ -1,0 +1,201 @@
+--- SLIDE 1 ---
+1) Title/Heading
+- SAARTHI.AI
+- Subtitle/tagline: “The Conscious Navigator”
+
+2) Content Summary
+- Intro/cover slide presenting a product/initiative named SAARTHI.AI with the tagline “The Conscious Navigator.”
+- Branding indicates association with Bosch (Bosch logo at bottom-right).
+- Emphasis on navigation/guidance concept, supported by a chariot-and-globe icon.
+
+3) Key Points (bullet points, text)
+- SAARTHI.AI (primary brand name)
+- The Conscious Navigator (positioning/mission statement)
+- BOSCH (brand/logo)
+
+4) Visual Elements (charts, images, diagrams)
+- Large abstract logo/mark at top-left with curved lines (teal and magenta).
+- Numerous scattered circular dots in teal, magenta, and gray across the slide.
+- Partial large magenta ring in the top-right corner.
+- Small dark navy rounded rectangle containing a gold line illustration of a charioteer with a globe (navigation motif) near the right side.
+- Bosch logo (black/red) at the bottom-right.
+- Thin multicolor strip along the bottom edge.
+
+5) Layout & Design (structure, colors)
+- Clean, minimalist cover-slide layout with ample white space.
+- Central, oversized title in teal; subtitle directly underneath in magenta.
+- Supporting icon to the right of the subtitle for visual balance.
+- Color palette: teal/green, magenta, gray accents, navy for the icon, plus the Bosch red/black logo.
+- Sans-serif, bold typography; “SAARTHI.AI” in all caps; subtitle in title case.
+- Playful dot motif and curved forms provide motion and modern feel.
+
+6) Data/Numbers (metrics, statistics)
+- None present on this slide.
+
+--- SLIDE 2 ---
+1) Title/Heading
+- Saarthi.AI: The Conscious Navigator
+- Phase I Launch: 05 Oct’25
+
+2) Content Summary
+The slide introduces Saarthi.AI and announces its Phase I launch date. It lists initial capabilities, highlights what makes the solution unique, and frames the concept of a human-in-control pool of “AI Workers” to steer decisions and actions. It states the motivation for a unified, AI-native platform at BGSW and sets a growth plan from 100 early users to 1000+ AI workers.
+
+3) Key Points (bullet points, text)
+- Phase I Features:
+  - Scalable to 100 users (identified key leadership users)
+  - Able to converse with Market Intelligence PDFs
+  - Able to converse with hierarchical BGSW Docupedia
+  - Seamless integration with BGSW-RED lake/mesh
+- How is SAARTHI.AI unique?
+  - Internal vs external data comparison
+  - Data forecast
+- Human-in-Control “AI Workers” pool to steer decisions & actions
+- Motivation:
+  - Unified platform to enable BGSW to be an AI-native enterprise
+  - Allows federated deployment of agentic AI: AI Navigator(s)
+  - Goal: Start with 100 in 2025–2026 Q1 and grow to 1000+ AI workers across BGSW
+- Tagline/banner:
+  - “Be one of the first of the kind in GCC world focusing on Biz functions, VSO and CXOs.”
+
+4) Visual Elements (charts, images, diagrams)
+- No charts or diagrams
+- Right-side grey panel containing the “Human-in-Control ‘AI Workers’…” section and Motivation text
+- Checkmark icon next to “Phase I Features”
+- Bottom full-width blue banner with the “Be one of the first of the kind…” statement
+- Footer with internal notice and copyright; slide number “2”
+
+5) Layout & Design (structure, colors)
+- Two-column layout:
+  - Left column: main heading, launch date, features, and uniqueness bullets
+  - Right column: grey boxed panel for the AI Workers concept and motivation
+- Colors:
+  - Main title in black; “Phase I Launch : 05 Oct’25” in bright blue
+  - Section headers (“Phase I Features,” “How is SAARTHI.AI unique?”) in teal/green
+  - “AI Workers” highlighted in magenta/pink within the grey panel
+  - Motivation label in blue
+  - Bottom banner in dark/royal blue with white text
+- Clean, corporate styling with bullets and clear hierarchy
+
+6) Data/Numbers (metrics, statistics)
+- Launch date: 05 Oct’25
+- Phase I scalability: 100 users (identified key leadership users)
+- Growth plan: start with 100 AI workers in 2025–2026 Q1 and grow to 1000+ across BGSW
+- Slide number: 2
+- Footer timestamp: Oct 2025; © 2025 Bosch Global Software Technologies Private Limited
+
+--- SLIDE 3 ---
+1) Title/Heading
+- Saarthi.AI: The Conscious Navigator
+- Phase II Launch: 31 Mar ’26
+
+2) Content Summary
+- The slide outlines Phase II milestones for Saarthi.AI to be achieved by March 31, 2026. It focuses on scaling users, deploying AI agents, integrating domain-specific copilots, establishing governance and risk controls, and tracking adoption/ROI across business units.
+
+3) Key Points
+- User Expansion
+  - Scale to 300+ users across 6–8 business units: Engineering, HR, Finance, Sales, Delivery, PMO.
+- Agentic Growth
+  - Deploy 20+ AI agents (co‑pilots, advisors, checkers, responders) tied to specific workflows.
+- Domain Integration
+  - Roll out copilots for:
+    - HR: Talent Insights, Onboarding analytics.
+    - Finance: TBP forecasting, Receivables AI.
+    - Delivery: GB reporting, effort forecasting.
+- Governance Layer
+  - Launch policy‑as‑code enforcement, Prompt Audit Logging, and LLM risk heatmaps.
+- Adoption Metrics
+  - Introduce usage dashboards and an ROI scorecard per business unit.
+- Positioning statement (banner at bottom)
+  - “Be one of the first of the kind in GCC world focusing on Biz functions, VSO and CXOs.”
+
+4) Visual Elements
+- A large two‑column table labeled “Area” and “Milestones.”
+- No charts or diagrams; text-only table.
+- Bottom banner with a positioning message.
+- Corporate footer with “Internal | BGSWBDO | Q4 2025” and Bosch Global Software Technologies copyright.
+
+5) Layout & Design
+- Title at top-left; launch date emphasized in bold blue text.
+- Main content inside a grey rounded rectangle containing the table.
+- Color scheme:
+  - Black primary title text; bright blue for “Phase II Launch: 31 Mar’26.”
+  - Teal for column headers (“Area,” “Milestones”).
+  - Magenta for area titles (User Expansion, Agentic Growth, etc.).
+  - Body text in dark grey/black.
+- Clean, grid-based layout; no icons; sans‑serif font; ample spacing.
+
+6) Data/Numbers (metrics, statistics)
+- 300+ users target.
+- 6–8 business units (listed: Engineering, HR, Finance, Sales, Delivery, PMO).
+- 20+ AI agents planned (types: co‑pilots, advisors, checkers, responders).
+- Specific domain deployments: HR (2 items), Finance (2 items), Delivery (2 items).
+- Governance deliverables: policy-as-code, prompt audit logging, LLM risk heatmaps.
+- Adoption tracking: usage dashboards and ROI scorecards per business unit.
+- Timeline marker: Phase II launch date 31 Mar ’26; slide footer indicates Q4 2025 context.
+
+--- SLIDE 4 ---
+1) Title/Heading
+- Saarthi.AI: The Conscious Navigator
+- Phase III Launch: 31 Aug ’26
+
+2) Content Summary
+- The slide outlines Phase III launch milestones for Saarthi.AI. It focuses on scaling AI workers across enterprise functions, introducing co-agentic autonomy, delivering role-based persona suites, preparing a white-labeled external offering, and strengthening performance engineering for self-healing AI.
+
+3) Key Points (bullet points, text)
+- AI Worker Scale: Grow to 500+ AI workers covering ≥60% of mapped enterprise functions (HR, Finance, Sales, etc.).
+- Intelligent Autonomy (CIA → NIA): Launch co-agentic orchestration for HR, Finance, and Delivery (agents plan, act, and report with oversight).
+- Persona Pack Rollouts: Release hyper-focused, role-based persona suites (CXO cockpits).
+- External Readiness: Begin design of a white-labeled version for Bosch-wide or partner-facing use.
+- Performance Engineering: Implement telemetry, drift detection, and feedback loops to enable self-healing AI routines.
+- Tagline/banner: “Be one of the first of the kind in GCC world focusing on Biz functions, VSO and CXOs.”
+
+4) Visual Elements (charts, images, diagrams)
+- A 2-column table labeled “Area” and “Milestones” with five rows of content.
+- No charts, graphs, or photos.
+- Bottom banner with a slogan; footer with internal/copyright line and slide number (4).
+
+5) Layout & Design (structure, colors)
+- Top-left title; the launch date line is emphasized in blue.
+- Central table with gray cells and black grid lines.
+- Left column “Area” terms in magenta/pink; header labels in teal/green.
+- Bottom full-width dark-blue banner with white text.
+- Clean, text-first layout on a light background; corporate footer in dark blue.
+
+6) Data/Numbers (metrics, statistics)
+- 500+ AI workers target.
+- ≥60% coverage of mapped enterprise functions.
+- Launch date: 31 Aug 2026.
+- Footer timing reference: Q4 2025 (document/internal marker).
+
+--- SLIDE 5 ---
+1) Title/Heading
+- “THANK YOU” (all caps, centered)
+
+2) Content Summary
+- A closing/thank‑you slide with strong brand presence. No body copy, agenda, or next steps. Serves as the final slide to conclude a presentation.
+
+3) Key Points (bullet points, text)
+- Single message: “THANK YOU”
+- Brand marks:
+  - Bosch logo at bottom right
+  - “Bosch Global Software Technologies” wordmark at bottom left (with a small tagline beneath it)
+
+4) Visual Elements (charts, images, diagrams)
+- No charts, graphs, icons, or photos
+- Decorative, thick curved bands/arcs sweeping in from edges (magenta and teal/green)
+- Bosch logo (gray emblem + red “BOSCH”) as a graphic element
+
+5) Layout & Design (structure, colors)
+- Layout: Widescreen slide, large central white space; main text centered
+- Typography: Bold sans‑serif, uppercase for the “THANK YOU” message
+- Color palette:
+  - Magenta (used for the headline and several arcs)
+  - Teal/green (used for other arcs)
+  - White background
+  - Bosch logo colors (gray emblem, red wordmark); small multicolor accent strip at far right edge
+- Composition: Minimalist; heavy use of negative space; dynamic curved shapes frame the center
+- Branding: Clear Bosch branding in both corners
+
+6) Data/Numbers (metrics, statistics)
+- None present on this slide.
+
