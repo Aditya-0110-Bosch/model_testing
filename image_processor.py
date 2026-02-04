@@ -114,7 +114,7 @@ class ImageProcessor:
         self,
         image_path: str,
         custom_prompt: Optional[str] = None,
-        max_tokens: int = 2000  # Increased from 500 to allow for reasoning + output
+        # max_tokens: int = 2000  
     ) -> str:
         """
         Generate description for an image using GPT-5 Vision
@@ -167,7 +167,7 @@ Be descriptive and specific."""
                         ]
                     }
                 ],
-                max_completion_tokens=max_tokens
+                # max_completion_tokens=max_tokens
             )
             
             # Extract description from response

@@ -141,7 +141,7 @@ STRUCTURE: <description>
 INSIGHTS: <insights>"""
                     }
                 ],
-                max_tokens=800
+                # max_tokens=800
             )
             
             content = response.choices[0].message.content

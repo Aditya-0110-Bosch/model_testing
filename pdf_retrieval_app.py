@@ -13,6 +13,7 @@ from pdf_processor import PDFProcessor
 from vector_store import VectorStoreManager, RetrievalConfig
 from evaluation import RetrievalEvaluator
 from image_processor import ImageProcessor, save_uploaded_image, supported_image_formats
+from ppt_processor import PPTProcessor, supported_ppt_formats
 
 # Page configuration
 st.set_page_config(
@@ -52,6 +53,8 @@ if 'processor' not in st.session_state:
     st.session_state.processor = None
 if 'image_processor' not in st.session_state:
     st.session_state.image_processor = None
+if 'ppt_processor' not in st.session_state:
+    st.session_state.ppt_processor = None
 if 'vector_store_manager' not in st.session_state:
     st.session_state.vector_store_manager = None
 if 'evaluator' not in st.session_state:
@@ -60,12 +63,16 @@ if 'processed_pdfs' not in st.session_state:
     st.session_state.processed_pdfs = []
 if 'processed_images' not in st.session_state:
     st.session_state.processed_images = []
+if 'processed_ppts' not in st.session_state:
+    st.session_state.processed_ppts = []
 if 'all_documents' not in st.session_state:
     st.session_state.all_documents = []
 if 'pdf_documents' not in st.session_state:
     st.session_state.pdf_documents = []
 if 'image_documents' not in st.session_state:
     st.session_state.image_documents = []
+if 'ppt_documents' not in st.session_state:
+    st.session_state.ppt_documents = []
 if 'retrieval_results' not in st.session_state:
     st.session_state.retrieval_results = []
 
@@ -147,7 +154,7 @@ def render_sidebar():
         
         store_type = st.radio(
             "Store Type",
-            options=["Combined (PDFs + Images)", "PDFs Only", "Images Only"],
+            options=["Combined (All)", "PDFs Only", "Images Only", "PPTs Only"],
             index=0,
             help="Choose which documents to save/load"
         )
@@ -168,12 +175,12 @@ def save_vector_store(store_type: str):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     try:
-        if store_type == "Combined (PDFs + Images)":
+        if store_type == "Combined (All)":
             if st.session_state.vector_store_manager and st.session_state.vector_store_manager.vector_store:
                 save_path = f"vector_stores/combined_{timestamp}"
                 st.session_state.vector_store_manager.save_vector_store(save_path)
                 st.success(f"✅ Combined vector store saved to {save_path}")
-                st.info(f"📊 Saved {len(st.session_state.all_documents)} documents (PDFs + Images)")
+                st.info(f"📊 Saved {len(st.session_state.all_documents)} documents (PDFs + Images + PPTs)")
             else:
                 st.warning("⚠️ No combined vector store to save. Please process documents first.")
         
@@ -206,6 +213,21 @@ def save_vector_store(store_type: str):
                 st.info(f"🖼️ Saved {len(st.session_state.image_documents)} image documents")
             else:
                 st.warning("⚠️ No image documents to save. Please process images first.")
+        
+        elif store_type == "PPTs Only":
+            if st.session_state.ppt_documents:
+                save_path = f"vector_stores/ppt_only_{timestamp}"
+                # Create temporary vector store for PPTs only
+                temp_manager = VectorStoreManager(
+                    max_workers=st.session_state.max_workers,
+                    index_type=st.session_state.config.index_type
+                )
+                temp_manager.create_vector_store(st.session_state.ppt_documents)
+                temp_manager.save_vector_store(save_path)
+                st.success(f"✅ PPT-only vector store saved to {save_path}")
+                st.info(f"📊 Saved {len(st.session_state.ppt_documents)} PPT slide documents")
+            else:
+                st.warning("⚠️ No PPT documents to save. Please process PPTs first.")
     
     except Exception as e:
         st.error(f"❌ Error saving vector store: {e}")
@@ -221,12 +243,14 @@ def load_vector_store(store_type: str):
         all_stores = [d for d in os.listdir("vector_stores") if os.path.isdir(os.path.join("vector_stores", d))]
         
         # Filter stores based on type
-        if store_type == "Combined (PDFs + Images)":
+        if store_type == "Combined (All)":
             stores = [s for s in all_stores if s.startswith("combined_") or s.startswith("store_")]
         elif store_type == "PDFs Only":
             stores = [s for s in all_stores if s.startswith("pdf_only_")]
         elif store_type == "Images Only":
             stores = [s for s in all_stores if s.startswith("image_only_")]
+        elif store_type == "PPTs Only":
+            stores = [s for s in all_stores if s.startswith("ppt_only_")]
         
         if stores:
             selected_store = st.sidebar.selectbox(f"Select {store_type} Store", stores, key=f"load_{store_type}")
@@ -245,11 +269,13 @@ def load_vector_store(store_type: str):
                 
                 # Provide info about what was loaded
                 if "combined" in selected_store or "store" in selected_store:
-                    st.info("📊 Loaded combined PDFs + Images store")
+                    st.info("📊 Loaded combined PDFs + Images + PPTs store")
                 elif "pdf_only" in selected_store:
                     st.info("📄 Loaded PDF-only store")
                 elif "image_only" in selected_store:
                     st.info("🖼️ Loaded image-only store")
+                elif "ppt_only" in selected_store:
+                    st.info("📊 Loaded PPT-only store")
                     
             except Exception as e:
                 st.error(f"❌ Error loading vector store: {e}")
@@ -542,6 +568,182 @@ def render_image_statistics(image_data_list):
                     st.info(img_data['image_description'])
 
 
+def render_ppt_upload_tab():
+    """Render PPT upload and processing tab"""
+    
+    st.header("📊 Upload and Process PowerPoint Presentations")
+    
+    # File uploader for PPTs
+    uploaded_ppts = st.file_uploader(
+        "Upload PowerPoint files",
+        type=supported_ppt_formats(),
+        accept_multiple_files=True,
+        help="Select one or more PowerPoint files to process",
+        key="ppt_uploader"
+    )
+    
+    if uploaded_ppts:
+        st.info(f"📊 {len(uploaded_ppts)} PowerPoint file(s) selected")
+        
+        # Show file list
+        with st.expander("📋 View uploaded files", expanded=True):
+            for ppt_file in uploaded_ppts:
+                st.write(f"• {ppt_file.name} ({ppt_file.size / 1024:.2f} KB)")
+        
+        # Custom prompt option
+        st.subheader("⚙️ Slide Description Settings")
+        
+        use_custom_prompt = st.checkbox(
+            "Use custom prompt for slide descriptions",
+            value=False,
+            help="Provide a custom prompt for GPT-5 to describe slides"
+        )
+        
+        custom_prompt = None
+        if use_custom_prompt:
+            custom_prompt = st.text_area(
+                "Custom Prompt",
+                value="""Analyze this PowerPoint slide and provide a comprehensive description including:
+1. Main title/heading
+2. Key points and content
+3. Visual elements (charts, diagrams, images)
+4. Text content and bullet points
+5. Overall message or purpose of the slide
+
+Be detailed and capture all important information.""",
+                height=200,
+                help="Customize how GPT-5 should describe your slides"
+            )
+        
+        # Process button
+        if st.button("🚀 Process PowerPoints", type="primary", key="process_ppts_btn"):
+            process_ppts(uploaded_ppts, custom_prompt)
+
+
+def process_ppts(uploaded_ppts, custom_prompt=None):
+    """Process uploaded PowerPoint files"""
+    
+    # Save uploaded PPTs temporarily
+    temp_dir = "temp_pdfs"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    ppt_paths = []
+    for uploaded_ppt in uploaded_ppts:
+        file_path = os.path.join(temp_dir, uploaded_ppt.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_ppt.getbuffer())
+        ppt_paths.append(file_path)
+    
+    # Initialize PPT processor
+    if st.session_state.ppt_processor is None:
+        st.session_state.ppt_processor = PPTProcessor(max_workers=st.session_state.max_workers)
+    
+    # Process PPTs with progress bar
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    status_text.text("📊 Converting slides to images and generating descriptions with GPT-5...")
+    
+    try:
+        # Process PPTs
+        ppt_data_list, ppt_documents = st.session_state.ppt_processor.process_and_create_documents(
+            ppt_paths,
+            custom_prompt=custom_prompt
+        )
+        
+        st.session_state.processed_ppts.extend(ppt_data_list)
+        
+        progress_bar.progress(60)
+        status_text.text("🔢 Creating embeddings and updating vector store...")
+        
+        # Add to all_documents and track PPTs separately
+        st.session_state.all_documents.extend(ppt_documents)
+        st.session_state.ppt_documents.extend(ppt_documents)
+        
+        # Create or update vector store
+        if st.session_state.vector_store_manager is None:
+            st.session_state.vector_store_manager = VectorStoreManager(
+                max_workers=st.session_state.max_workers,
+                index_type=st.session_state.config.index_type
+            )
+            st.session_state.vector_store_manager.create_vector_store(ppt_documents)
+        else:
+            st.session_state.vector_store_manager.add_documents(ppt_documents)
+        
+        progress_bar.progress(100)
+        status_text.text("✅ PPT processing complete!")
+        
+        # Show summary
+        total_slides = sum(ppt['total_slides'] for ppt in ppt_data_list)
+        st.success(f"""
+        **PowerPoint Processing Summary:**
+        - PPT files processed: {len(ppt_data_list)}
+        - Total slides: {total_slides}
+        - Total documents created: {len(ppt_documents)}
+        - Descriptions generated by: GPT-5 Vision
+        """)
+        
+        # Display PPT details
+        render_ppt_statistics(ppt_data_list)
+        
+    except Exception as e:
+        st.error(f"❌ Error processing PowerPoints: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+    
+    finally:
+        progress_bar.empty()
+        status_text.empty()
+
+
+def render_ppt_statistics(ppt_data_list):
+    """Render PPT processing statistics"""
+    
+    if ppt_data_list:
+        st.subheader("📊 PowerPoint Statistics")
+        
+        total_slides = sum(ppt['total_slides'] for ppt in ppt_data_list)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Total PPT Files", len(ppt_data_list))
+        
+        with col2:
+            st.metric("Total Slides", total_slides)
+        
+        with col3:
+            avg_slides = total_slides / len(ppt_data_list)
+            st.metric("Avg Slides per PPT", f"{avg_slides:.1f}")
+        
+        # Display PPT details in expandable cards
+        st.subheader("📊 PowerPoint Details")
+        
+        for ppt_data in ppt_data_list:
+            with st.expander(f"📊 {ppt_data['ppt_name']} ({ppt_data['total_slides']} slides)", expanded=False):
+                
+                # Display each slide
+                for idx, slide in enumerate(ppt_data['slides']):
+                    st.markdown(f"### Slide {slide['slide_number']}")
+                    
+                    col1, col2 = st.columns([1, 2])
+                    
+                    with col1:
+                        # Display slide image
+                        if os.path.exists(slide['slide_image_path']):
+                            st.image(slide['slide_image_path'], width="stretch")
+                        st.write(f"**Resolution:** {slide['slide_image_resolution']}")
+                        st.write(f"**Format:** {slide['slide_image_format']}")
+                        st.write(f"**Size:** {slide['slide_image_size_bytes'] / 1024:.2f} KB")
+                    
+                    with col2:
+                        st.markdown("**GPT-5 Generated Description:**")
+                        st.info(slide['slide_description'])
+                    
+                    if idx < len(ppt_data['slides']) - 1:
+                        st.divider()
+
+
 def render_statistics():
     """Render processing statistics"""
     
@@ -711,11 +913,18 @@ def render_results():
                 st.write(f"**Normalized Score:** {result['normalized_score']:.4f}")
             
             # Display image if it's an image result
+            is_ppt = result['metadata'].get('source') == 'ppt'
             if is_image:
                 image_path = result['metadata'].get('image_path')
                 if image_path and os.path.exists(image_path):
                     st.markdown("**Image Preview:**")
                     st.image(image_path, width="stretch")
+            elif is_ppt:
+                slide_image_path = result['metadata'].get('slide_image_path')
+                if slide_image_path and os.path.exists(slide_image_path):
+                    st.markdown("**Slide Preview:**")
+                    st.image(slide_image_path, width="stretch")
+                    st.caption(f"Slide {result['metadata'].get('slide_number', 'N/A')} from {result['metadata'].get('ppt_name', 'Unknown')}")
             
             # Content / Description
             st.markdown("**Content/Description:**")
@@ -819,6 +1028,11 @@ def render_metadata_tab():
         if 'chunk_type' in df.columns:
             chunk_types = [ct for ct in df['chunk_type'].unique().tolist() if ct not in content_types]
             content_types.extend(chunk_types)
+        if 'source' in df.columns:
+            sources_col = df['source'].unique().tolist()
+            for src in sources_col:
+                if src == 'ppt' and src not in content_types:
+                    content_types.append('ppt_slide')
         
         if content_types:
             selected_types = st.multiselect(
@@ -836,6 +1050,8 @@ def render_metadata_tab():
             sources.extend(df['pdf_name'].dropna().unique().tolist())
         if 'image_name' in df.columns:
             sources.extend(df['image_name'].dropna().unique().tolist())
+        if 'ppt_name' in df.columns:
+            sources.extend(df['ppt_name'].dropna().unique().tolist())
         
         if sources:
             selected_sources = st.multiselect(
@@ -855,6 +1071,8 @@ def render_metadata_tab():
             mask |= df['content_type'].isin(selected_types)
         if 'chunk_type' in df.columns:
             mask |= df['chunk_type'].isin(selected_types)
+        if 'source' in df.columns and 'ppt_slide' in selected_types:
+            mask |= df['source'] == 'ppt'
         filtered_df = filtered_df[mask]
     
     if selected_sources:
@@ -863,6 +1081,8 @@ def render_metadata_tab():
             mask |= filtered_df['pdf_name'].isin(selected_sources)
         if 'image_name' in filtered_df.columns:
             mask |= filtered_df['image_name'].isin(selected_sources)
+        if 'ppt_name' in filtered_df.columns:
+            mask |= filtered_df['ppt_name'].isin(selected_sources)
         filtered_df = filtered_df[mask]
     
     st.write(f"**Showing {len(filtered_df)} of {len(df)} documents**")
@@ -889,14 +1109,14 @@ def main():
     """Main application"""
     
     # Title
-    st.title("📚 PDF & Image Embedding & Retrieval Experimentation")
+    st.title("📚 PDF, Image & PowerPoint Embedding & Retrieval Experimentation")
     st.markdown("*Powered by Azure OpenAI (text-embedding-3-large) and GPT-5-Saarathi*")
     
     # Render sidebar
     render_sidebar()
     
     # Main tabs
-    tabs = st.tabs(["📤 Upload PDFs", "🖼️ Upload Images", "🔍 Retrieval", "📈 Evaluation", "🗂️ Metadata"])
+    tabs = st.tabs(["📤 Upload PDFs", "🖼️ Upload Images", "📊 Upload PPTs", "🔍 Retrieval", "📈 Evaluation", "🗂️ Metadata"])
     
     with tabs[0]:
         render_upload_tab()
@@ -905,17 +1125,20 @@ def main():
         render_image_upload_tab()
     
     with tabs[2]:
-        render_retrieval_tab()
+        render_ppt_upload_tab()
     
     with tabs[3]:
-        render_evaluation_tab()
+        render_retrieval_tab()
     
     with tabs[4]:
+        render_evaluation_tab()
+    
+    with tabs[5]:
         render_metadata_tab()
     
     # Footer
     st.divider()
-    st.caption("PDF & Image Retrieval Experimentation Interface | Built with Streamlit, LangChain, FAISS, and GPT-5 Vision")
+    st.caption("PDF, Image & PowerPoint Retrieval Experimentation Interface | Built with Streamlit, LangChain, FAISS, Spire.Presentation, and GPT-5 Vision")
 
 
 if __name__ == "__main__":
