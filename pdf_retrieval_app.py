@@ -156,100 +156,37 @@ def render_sidebar():
         )
         st.session_state.max_workers = max_workers
         
-        # Save/Load Vector Store
-        st.header("Vector Store Persistence")
-        
-        store_type = st.radio(
-            "Store Type",
-            options=["Combined (All)", "PDFs Only", "Images Only", "PPTs Only", "DOCs Only"],
-            index=0,
-            help="Choose which documents to save/load"
-        )
+        # Vector Store Management
+        st.header("Vector Store Management")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("💾 Save Store", width="stretch"):
-                save_vector_store(store_type)
+            if st.button("💾 Save to DB", use_container_width=True):
+                save_vector_store()
         
         with col2:
-            if st.button("📂 Load Store", width="stretch"):
-                load_vector_store(store_type)
+            if st.button("📂 Load from DB", use_container_width=True):
+                load_vector_store()
+        
+        st.divider()
+        
+        if st.button("🗑️ Clear Vector Store", use_container_width=True, type="secondary"):
+            clear_vector_store()
 
 
-def save_vector_store(store_type: str):
-    """Save vector store to disk"""
+def save_vector_store():
+    """Save combined vector store to disk"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     try:
-        if store_type == "Combined (All)":
-            if st.session_state.vector_store_manager and st.session_state.vector_store_manager.vector_store:
-                save_path = f"vector_stores/combined_{timestamp}"
-                st.session_state.vector_store_manager.save_vector_store(save_path)
-                st.success(f"✅ Combined vector store saved to {save_path}")
-                st.info(f"📊 Saved {len(st.session_state.all_documents)} documents (PDFs + Images + PPTs + DOCs)")
-            else:
-                st.warning("⚠️ No combined vector store to save. Please process documents first.")
-        
-        elif store_type == "PDFs Only":
-            if st.session_state.pdf_documents:
-                save_path = f"vector_stores/pdf_only_{timestamp}"
-                # Create temporary vector store for PDFs only
-                temp_manager = VectorStoreManager(
-                    max_workers=st.session_state.max_workers,
-                    index_type=st.session_state.config.index_type
-                )
-                temp_manager.create_vector_store(st.session_state.pdf_documents)
-                temp_manager.save_vector_store(save_path)
-                st.success(f"✅ PDF-only vector store saved to {save_path}")
-                st.info(f"📄 Saved {len(st.session_state.pdf_documents)} PDF documents")
-            else:
-                st.warning("⚠️ No PDF documents to save. Please process PDFs first.")
-        
-        elif store_type == "Images Only":
-            if st.session_state.image_documents:
-                save_path = f"vector_stores/image_only_{timestamp}"
-                # Create temporary vector store for images only
-                temp_manager = VectorStoreManager(
-                    max_workers=st.session_state.max_workers,
-                    index_type=st.session_state.config.index_type
-                )
-                temp_manager.create_vector_store(st.session_state.image_documents)
-                temp_manager.save_vector_store(save_path)
-                st.success(f"✅ Image-only vector store saved to {save_path}")
-                st.info(f"🖼️ Saved {len(st.session_state.image_documents)} image documents")
-            else:
-                st.warning("⚠️ No image documents to save. Please process images first.")
-        
-        elif store_type == "PPTs Only":
-            if st.session_state.ppt_documents:
-                save_path = f"vector_stores/ppt_only_{timestamp}"
-                # Create temporary vector store for PPTs only
-                temp_manager = VectorStoreManager(
-                    max_workers=st.session_state.max_workers,
-                    index_type=st.session_state.config.index_type
-                )
-                temp_manager.create_vector_store(st.session_state.ppt_documents)
-                temp_manager.save_vector_store(save_path)
-                st.success(f"✅ PPT-only vector store saved to {save_path}")
-                st.info(f"📊 Saved {len(st.session_state.ppt_documents)} PPT slide documents")
-            else:
-                st.warning("⚠️ No PPT documents to save. Please process PPTs first.")
-        
-        elif store_type == "DOCs Only":
-            if st.session_state.doc_documents:
-                save_path = f"vector_stores/doc_only_{timestamp}"
-                # Create temporary vector store for DOCs only
-                temp_manager = VectorStoreManager(
-                    max_workers=st.session_state.max_workers,
-                    index_type=st.session_state.config.index_type
-                )
-                temp_manager.create_vector_store(st.session_state.doc_documents)
-                temp_manager.save_vector_store(save_path)
-                st.success(f"✅ DOC-only vector store saved to {save_path}")
-                st.info(f"📄 Saved {len(st.session_state.doc_documents)} DOC page documents")
-            else:
-                st.warning("⚠️ No DOC documents to save. Please process DOCs first.")
+        if st.session_state.vector_store_manager and st.session_state.vector_store_manager.vector_store:
+            save_path = f"vector_stores/combined_{timestamp}"
+            st.session_state.vector_store_manager.save_vector_store(save_path)
+            st.success(f"✅ Vector store saved to {save_path}")
+            st.info(f"📊 Saved {len(st.session_state.all_documents)} documents (All formats combined)")
+        else:
+            st.warning("⚠️ No vector store to save. Please process documents first.")
     
     except Exception as e:
         st.error(f"❌ Error saving vector store: {e}")
@@ -257,27 +194,16 @@ def save_vector_store(store_type: str):
         st.error(traceback.format_exc())
 
 
-def load_vector_store(store_type: str):
-    """Load vector store from disk"""
+def load_vector_store():
+    """Load combined vector store from disk"""
     
     # List available stores
     if os.path.exists("vector_stores"):
         all_stores = [d for d in os.listdir("vector_stores") if os.path.isdir(os.path.join("vector_stores", d))]
-        
-        # Filter stores based on type
-        if store_type == "Combined (All)":
-            stores = [s for s in all_stores if s.startswith("combined_") or s.startswith("store_")]
-        elif store_type == "PDFs Only":
-            stores = [s for s in all_stores if s.startswith("pdf_only_")]
-        elif store_type == "Images Only":
-            stores = [s for s in all_stores if s.startswith("image_only_")]
-        elif store_type == "PPTs Only":
-            stores = [s for s in all_stores if s.startswith("ppt_only_")]
-        elif store_type == "DOCs Only":
-            stores = [s for s in all_stores if s.startswith("doc_only_")]
+        stores = [s for s in all_stores if s.startswith("combined_") or s.startswith("store_")]
         
         if stores:
-            selected_store = st.sidebar.selectbox(f"Select {store_type} Store", stores, key=f"load_{store_type}")
+            selected_store = st.sidebar.selectbox("Select Vector Store", stores, key="load_store")
             
             try:
                 if st.session_state.vector_store_manager is None:
@@ -290,27 +216,313 @@ def load_vector_store(store_type: str):
                     os.path.join("vector_stores", selected_store)
                 )
                 st.success(f"✅ Vector store loaded from {selected_store}")
-                
-                # Provide info about what was loaded
-                if "combined" in selected_store or "store" in selected_store:
-                    st.info("📊 Loaded combined PDFs + Images + PPTs + DOCs store")
-                elif "pdf_only" in selected_store:
-                    st.info("📄 Loaded PDF-only store")
-                elif "image_only" in selected_store:
-                    st.info("🖼️ Loaded image-only store")
-                elif "ppt_only" in selected_store:
-                    st.info("📊 Loaded PPT-only store")
-                elif "doc_only" in selected_store:
-                    st.info("📄 Loaded DOC-only store")
+                st.info("📊 Loaded combined vector store with all document formats")
                     
             except Exception as e:
                 st.error(f"❌ Error loading vector store: {e}")
                 import traceback
                 st.error(traceback.format_exc())
         else:
-            st.warning(f"⚠️ No {store_type} vector stores found.")
+            st.warning("⚠️ No vector stores found.")
     else:
         st.warning("⚠️ No vector_stores directory found.")
+
+
+def clear_vector_store():
+    """Clear the current vector store from memory"""
+    try:
+        st.session_state.vector_store_manager = None
+        st.session_state.all_documents = []
+        st.session_state.pdf_documents = []
+        st.session_state.image_documents = []
+        st.session_state.ppt_documents = []
+        st.session_state.doc_documents = []
+        st.session_state.retrieval_results = []
+        st.success("✅ Vector store cleared from memory")
+        st.info("💡 You can now upload new documents or load a saved vector store")
+    except Exception as e:
+        st.error(f"❌ Error clearing vector store: {e}")
+
+
+def render_unified_upload_tab():
+    """Render unified upload tab for all file formats"""
+    
+    st.header("📤 Upload and Process Documents")
+    st.markdown("*Upload PDF, Image, PowerPoint, or DOC/DOCX files - all formats supported*")
+    
+    # Single file uploader for all formats
+    uploaded_files = st.file_uploader(
+        "Upload files (PDF, Images, PPT, DOC/DOCX)",
+        type=['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp', 'ppt', 'pptx', 'doc', 'docx'],
+        accept_multiple_files=True,
+        help="Select one or more files of any supported format",
+        key="unified_uploader"
+    )
+    
+    if uploaded_files:
+        # Categorize files by type
+        pdf_files = [f for f in uploaded_files if f.name.lower().endswith('.pdf')]
+        image_files = [f for f in uploaded_files if f.name.lower().endswith(tuple(f'.{ext}' for ext in supported_image_formats()))]
+        ppt_files = [f for f in uploaded_files if f.name.lower().endswith(tuple(f'.{ext}' for ext in supported_ppt_formats()))]
+        doc_files = [f for f in uploaded_files if f.name.lower().endswith(tuple(f'.{ext}' for ext in supported_doc_formats()))]
+        
+        # Display file summary
+        st.info(f"""
+        **📁 {len(uploaded_files)} file(s) selected:**
+        - 📄 PDFs: {len(pdf_files)}
+        - 🖼️ Images: {len(image_files)}
+        - 📊 PowerPoints: {len(ppt_files)}
+        - 📝 DOC/DOCX: {len(doc_files)}
+        """)
+        
+        # Show file list
+        with st.expander("📋 View uploaded files"):
+            for file in uploaded_files:
+                file_type_icon = {
+                    'pdf': '📄',
+                    'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'bmp': '🖼️', 'tiff': '🖼️', 'webp': '🖼️',
+                    'ppt': '📊', 'pptx': '📊',
+                    'doc': '📝', 'docx': '📝'
+                }.get(file.name.split('.')[-1].lower(), '📄')
+                
+                st.write(f"{file_type_icon} {file.name} ({file.size / 1024:.2f} KB)")
+        
+        # Custom prompt option for vision-based processing
+        st.subheader("⚙️ Vision Description Settings (Optional)")
+        
+        use_custom_prompt = st.checkbox(
+            "Use custom prompt for AI-generated descriptions",
+            value=False,
+            help="Provide a custom prompt for GPT-5 Vision to describe images, slides, and document pages"
+        )
+        
+        custom_prompt = None
+        if use_custom_prompt:
+            custom_prompt = st.text_area(
+                "Custom Prompt",
+                value="""Analyze this image/slide/document page and provide a comprehensive description including:
+1. Main title/heading or subject
+2. Key text content and bullet points
+3. Visual elements (charts, diagrams, images, tables)
+4. Overall structure and layout
+5. Purpose or message
+
+Be detailed and capture all important information.""",
+                height=200,
+                help="This prompt will be used for images, PPT slides, and DOC pages"
+            )
+        
+        # Process button
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            process_button = st.button("🚀 Process All Files", type="primary", use_container_width=True)
+        with col2:
+            append_info = st.info("📌 Files will be added to existing vector store")
+        
+        if process_button:
+            process_all_files(pdf_files, image_files, ppt_files, doc_files, custom_prompt)
+
+
+def process_all_files(pdf_files, image_files, ppt_files, doc_files, custom_prompt=None):
+    """Process all uploaded files and add to vector store"""
+    
+    all_new_documents = []
+    total_files = len(pdf_files) + len(image_files) + len(ppt_files) + len(doc_files)
+    
+    if total_files == 0:
+        st.warning("⚠️ No files to process")
+        return
+    
+    # Create main progress tracking
+    main_progress = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        current_step = 0
+        total_steps = (1 if pdf_files else 0) + (1 if image_files else 0) + (1 if ppt_files else 0) + (1 if doc_files else 0) + 1
+        
+        # Process PDFs
+        if pdf_files:
+            status_text.text(f"📄 Processing {len(pdf_files)} PDF file(s)...")
+            pdf_documents = process_pdfs_unified(pdf_files)
+            all_new_documents.extend(pdf_documents)
+            st.session_state.pdf_documents.extend(pdf_documents)
+            current_step += 1
+            main_progress.progress(current_step / total_steps)
+        
+        # Process Images
+        if image_files:
+            status_text.text(f"🖼️ Processing {len(image_files)} image file(s)...")
+            image_documents = process_images_unified(image_files, custom_prompt)
+            all_new_documents.extend(image_documents)
+            st.session_state.image_documents.extend(image_documents)
+            current_step += 1
+            main_progress.progress(current_step / total_steps)
+        
+        # Process PowerPoints
+        if ppt_files:
+            status_text.text(f"📊 Processing {len(ppt_files)} PowerPoint file(s)...")
+            ppt_documents = process_ppts_unified(ppt_files, custom_prompt)
+            all_new_documents.extend(ppt_documents)
+            st.session_state.ppt_documents.extend(ppt_documents)
+            current_step += 1
+            main_progress.progress(current_step / total_steps)
+        
+        # Process DOCs
+        if doc_files:
+            status_text.text(f"📝 Processing {len(doc_files)} DOC/DOCX file(s)...")
+            doc_documents = process_docs_unified(doc_files, custom_prompt)
+            all_new_documents.extend(doc_documents)
+            st.session_state.doc_documents.extend(doc_documents)
+            current_step += 1
+            main_progress.progress(current_step / total_steps)
+        
+        # Add to all_documents
+        st.session_state.all_documents.extend(all_new_documents)
+        
+        # Create or update vector store
+        status_text.text("🔢 Creating embeddings and updating vector store...")
+        
+        if st.session_state.vector_store_manager is None:
+            # Create new vector store
+            st.session_state.vector_store_manager = VectorStoreManager(
+                max_workers=st.session_state.max_workers,
+                index_type=st.session_state.config.index_type
+            )
+            st.session_state.vector_store_manager.create_vector_store(all_new_documents)
+        else:
+            # Append to existing vector store
+            st.session_state.vector_store_manager.add_documents(all_new_documents)
+        
+        current_step += 1
+        main_progress.progress(1.0)
+        status_text.text("✅ Processing complete!")
+        
+        # Show summary
+        st.success(f"""
+        **✅ Processing Summary:**
+        - Total files processed: {total_files}
+        - Documents created: {len(all_new_documents)}
+        - PDFs: {len(pdf_files)} files
+        - Images: {len(image_files)} files
+        - PowerPoints: {len(ppt_files)} files
+        - DOC/DOCX: {len(doc_files)} files
+        
+        **📊 Vector Store Status:**
+        - Total documents in store: {len(st.session_state.all_documents)}
+        - New documents added: {len(all_new_documents)}
+        """)
+        
+        # Display statistics
+        render_statistics()
+        
+    except Exception as e:
+        st.error(f"❌ Error processing files: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+    
+    finally:
+        main_progress.empty()
+        status_text.empty()
+
+
+def process_pdfs_unified(pdf_files):
+    """Process PDF files and return documents"""
+    temp_dir = "temp_pdfs"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    pdf_paths = []
+    for uploaded_file in pdf_files:
+        file_path = os.path.join(temp_dir, uploaded_file.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        pdf_paths.append(file_path)
+    
+    if st.session_state.processor is None:
+        st.session_state.processor = PDFProcessor(max_workers=st.session_state.max_workers)
+    
+    processed_data = st.session_state.processor.process_multiple_pdfs(pdf_paths)
+    st.session_state.processed_pdfs.extend(processed_data)
+    
+    all_documents = []
+    for pdf_data in processed_data:
+        documents = st.session_state.processor.create_chunks(
+            pdf_data,
+            chunk_size=st.session_state.config.chunk_size,
+            chunk_overlap=st.session_state.config.chunk_overlap,
+            splitter_type=st.session_state.config.splitter_type
+        )
+        all_documents.extend(documents)
+    
+    return all_documents
+
+
+def process_images_unified(image_files, custom_prompt=None):
+    """Process image files and return documents"""
+    temp_dir = "uploaded_images"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    image_paths = []
+    for uploaded_image in image_files:
+        file_path = save_uploaded_image(uploaded_image, temp_dir)
+        image_paths.append(file_path)
+    
+    if st.session_state.image_processor is None:
+        st.session_state.image_processor = ImageProcessor(max_workers=st.session_state.max_workers)
+    
+    image_data_list, image_documents = st.session_state.image_processor.process_and_create_documents(
+        image_paths,
+        custom_prompt=custom_prompt
+    )
+    
+    st.session_state.processed_images.extend(image_data_list)
+    return image_documents
+
+
+def process_ppts_unified(ppt_files, custom_prompt=None):
+    """Process PowerPoint files and return documents"""
+    temp_dir = "temp_pdfs"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    ppt_paths = []
+    for uploaded_ppt in ppt_files:
+        file_path = os.path.join(temp_dir, uploaded_ppt.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_ppt.getbuffer())
+        ppt_paths.append(file_path)
+    
+    if st.session_state.ppt_processor is None:
+        st.session_state.ppt_processor = PPTProcessor(max_workers=st.session_state.max_workers)
+    
+    ppt_data_list, ppt_documents = st.session_state.ppt_processor.process_and_create_documents(
+        ppt_paths,
+        custom_prompt=custom_prompt
+    )
+    
+    st.session_state.processed_ppts.extend(ppt_data_list)
+    return ppt_documents
+
+
+def process_docs_unified(doc_files, custom_prompt=None):
+    """Process DOC/DOCX files and return documents"""
+    temp_dir = "uploaded_documents"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    doc_paths = []
+    for uploaded_doc in doc_files:
+        file_path = save_uploaded_doc(uploaded_doc, temp_dir)
+        doc_paths.append(file_path)
+    
+    if st.session_state.doc_processor is None:
+        st.session_state.doc_processor = DocProcessor(max_workers=st.session_state.max_workers)
+    
+    doc_data_list, doc_documents = st.session_state.doc_processor.process_and_create_documents(
+        doc_paths,
+        custom_prompt=custom_prompt
+    )
+    
+    st.session_state.processed_docs.extend(doc_data_list)
+    return doc_documents
 
 
 def render_upload_tab():
@@ -1428,39 +1640,31 @@ def main():
     """Main application"""
     
     # Title
-    st.title("📚 PDF, Image, PowerPoint & DOC Embedding & Retrieval Experimentation")
+    st.title("📚 Multi-Format Document Embedding & Retrieval System")
     st.markdown("*Powered by Azure OpenAI (text-embedding-3-large) and GPT-5-Saarathi*")
+    st.markdown("*Supports: PDF, Images (PNG/JPG/etc), PowerPoint (PPT/PPTX), Word Documents (DOC/DOCX)*")
     
     # Render sidebar
     render_sidebar()
     
     # Main tabs
-    tabs = st.tabs(["📤 Upload PDFs", "🖼️ Upload Images", "📊 Upload PPTs", "� Upload DOCs", "🔍 Retrieval", "📈 Evaluation", "🗂️ Metadata"])
+    tabs = st.tabs([" Upload Documents", " Retrieval", " Evaluation", " Metadata"])
     
     with tabs[0]:
-        render_upload_tab()
+        render_unified_upload_tab()
     
     with tabs[1]:
-        render_image_upload_tab()
-    
-    with tabs[2]:
-        render_ppt_upload_tab()
-    
-    with tabs[3]:
-        render_doc_upload_tab()
-    
-    with tabs[4]:
         render_retrieval_tab()
     
-    with tabs[5]:
+    with tabs[2]:
         render_evaluation_tab()
     
-    with tabs[6]:
+    with tabs[3]:
         render_metadata_tab()
     
     # Footer
     st.divider()
-    st.caption("PDF, Image, PowerPoint & DOC Retrieval Experimentation Interface | Built with Streamlit, LangChain, FAISS, Spire.Presentation, docx2pdf, pdf2image, and GPT-5 Vision")
+    st.caption("Multi-Format Document Retrieval System | Built with Streamlit, LangChain, FAISS, Spire.Presentation, docx2pdf, pdf2image, and GPT-5 Vision")
 
 
 if __name__ == "__main__":

@@ -210,7 +210,7 @@ INSIGHTS: <insights>"""
             for table_idx, table in enumerate(doc.tables):
                 try:
                     # Convert Docling table to Pandas DataFrame
-                    df = table.export_to_dataframe()
+                    df = table.export_to_dataframe(doc)
                     
                     # Get page number from table provenance
                     page_num = table.prov[0].page_no if table.prov else 0
