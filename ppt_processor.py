@@ -45,7 +45,7 @@ class SlideMetadata:
 class PPTProcessor:
     """Process PowerPoint presentations by converting slides to images and generating descriptions"""
     
-    def __init__(self, max_workers: int = 4):
+    def __init__(self, max_workers: int = 8):
         """
         Initialize the PPT Processor
         
@@ -118,14 +118,7 @@ class PPTProcessor:
                 base64_image = base64.b64encode(image_file.read()).decode('utf-8')
             
             # Default prompt for PPT slides
-            default_prompt = """Analyze this PowerPoint slide and provide a comprehensive description including:
-1. Main title/heading
-2. Key points and content
-3. Visual elements (charts, diagrams, images)
-4. Text content and bullet points
-5. Overall message or purpose of the slide
-
-Be detailed and capture all important information."""
+            default_prompt = "Describe this PowerPoint slide in 2 to 3 lines. Include the main title/heading, key points, and any important visual elements (charts, diagrams, images)."
             
             prompt = custom_prompt if custom_prompt else default_prompt
             
@@ -206,17 +199,12 @@ Be detailed and capture all important information."""
         output_folder = os.path.join("output_images", f"{Path(ppt_path).stem}_{ppt_unique_id[:8]}")
         slide_image_paths = self.ppt_to_images(ppt_path, output_folder)
         
-        # Process each slide
-        slides_data = []
+        # Process each slide's description IN PARALLEL
+        slides_data = [None] * len(slide_image_paths)
         
-        for idx, slide_image_path in enumerate(slide_image_paths):
-            # Get slide description
+        def _describe_slide(idx, slide_image_path):
             slide_description = self.get_slide_description_gpt5(slide_image_path, custom_prompt)
-            
-            # Get image metadata
             img_metadata = self.get_image_metadata(slide_image_path)
-            
-            # Create slide metadata
             slide_data = SlideMetadata(
                 ppt_name=ppt_name,
                 ppt_path=ppt_path,
@@ -231,8 +219,23 @@ Be detailed and capture all important information."""
                 slide_image_format=img_metadata["format"],
                 slide_image_size_bytes=img_metadata["size_bytes"]
             )
-            
-            slides_data.append(asdict(slide_data))
+            return idx, asdict(slide_data)
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {
+                executor.submit(_describe_slide, idx, path): idx
+                for idx, path in enumerate(slide_image_paths)
+            }
+            for future in as_completed(futures):
+                try:
+                    idx, slide_dict = future.result()
+                    slides_data[idx] = slide_dict
+                except Exception as e:
+                    s_idx = futures[future]
+                    print(f"Error processing slide {s_idx + 1}: {e}")
+        
+        # Remove any None entries from failed slides
+        slides_data = [s for s in slides_data if s is not None]
         
         return {
             "ppt_name": ppt_name,

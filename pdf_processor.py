@@ -59,7 +59,7 @@ class ChunkMetadata:
 class PDFProcessor:
     """Process PDFs with parallel extraction of text, images, and tables"""
     
-    def __init__(self, max_workers: int = 4):
+    def __init__(self, max_workers: int = 8):
         self.max_workers = max_workers
         self.vision_client = AzureOpenAI(
             api_key=VISION_API_KEY,
@@ -97,7 +97,7 @@ class PDFProcessor:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Describe this image/figure/table from a PDF document. Include key information, data, labels, and context."
+                                "text": "Describe this image/figure/table from a PDF document. Include key information, data, labels, and context in 2 to 3 lines."
                             },
                             {
                                 "type": "image_url",
@@ -127,7 +127,7 @@ class PDFProcessor:
                 messages=[
                     {
                         "role": "user",
-                        "content": f"""Analyze this table extracted from a PDF (Page {page_num}).
+                        "content": f"""Analyze this table extracted from a PDF (Page {page_num}) in 2 to 3 lines.
 
 Table Information:
 {table_info}

@@ -3,11 +3,18 @@ Streamlit PDF Embedding and Retrieval Experimentation Interface
 """
 
 import os
+import time
+import logging
+import traceback
 import streamlit as st
 import pandas as pd
 import json
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from dotenv import load_dotenv
+from openai import AzureOpenAI
 
 from pdf_processor import PDFProcessor
 from vector_store import VectorStoreManager, RetrievalConfig
@@ -15,6 +22,69 @@ from evaluation import RetrievalEvaluator
 from image_processor import ImageProcessor, save_uploaded_image, supported_image_formats
 from ppt_processor import PPTProcessor, supported_ppt_formats
 from doc_processor import DocProcessor, save_uploaded_doc, supported_doc_formats
+
+# Load environment variables
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# GPT-5 credentials for RAG generation
+VISION_API_KEY = os.getenv("VISION_API_KEY")
+VISION_ENDPOINT = os.getenv("VISION_ENDPOINT")
+VISION_MODEL = os.getenv("VISION_MODEL", "gpt-5-Saarathi")
+VISION_API_VERSION = os.getenv("VISION_API_VERSION", "2025-01-01-preview")
+
+# Validate required environment variables
+if not all([VISION_API_KEY, VISION_ENDPOINT]):
+    error_msg = "Missing required environment variables: VISION_API_KEY and/or VISION_ENDPOINT"
+    logger.error(error_msg)
+    raise ValueError(error_msg)
+
+# ========== Production Utilities ==========
+
+from functools import wraps
+from openai import RateLimitError, APIError, APIConnectionError, APITimeoutError
+
+def retry_with_exponential_backoff(
+    func=None,
+    *,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    exponential_base: float = 2.0,
+    exceptions: tuple = (RateLimitError, APIError, APIConnectionError, APITimeoutError)
+):
+    """Retry decorator with exponential backoff for API calls"""
+    
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            num_retries = 0
+            delay = initial_delay
+            
+            while True:
+                try:
+                    return f(*args, **kwargs)
+                except exceptions as e:
+                    num_retries += 1
+                    if num_retries > max_retries:
+                        logger.error(f"Max retries ({max_retries}) exceeded for {f.__name__}. Last error: {str(e)}")
+                        raise
+                    
+                    import random
+                    sleep_time = delay * (exponential_base ** (num_retries - 1)) * (0.5 + random.random())
+                    logger.warning(f"Retry {num_retries}/{max_retries} for {f.__name__} after {sleep_time:.2f}s. Error: {str(e)}")
+                    time.sleep(sleep_time)
+                except Exception as e:
+                    logger.error(f"Non-retryable error in {f.__name__}: {str(e)}", exc_info=True)
+                    raise
+        return wrapper
+    
+    return decorator if func is None else decorator(func)
 
 # Page configuration
 st.set_page_config(
@@ -82,6 +152,14 @@ if 'doc_documents' not in st.session_state:
     st.session_state.doc_documents = []
 if 'retrieval_results' not in st.session_state:
     st.session_state.retrieval_results = []
+if 'chat_messages' not in st.session_state:
+    st.session_state.chat_messages = []
+if 'rag_client' not in st.session_state:
+    st.session_state.rag_client = AzureOpenAI(
+        api_key=VISION_API_KEY,
+        api_version=VISION_API_VERSION,
+        azure_endpoint=VISION_ENDPOINT
+    )
 
 
 def render_sidebar():
@@ -96,7 +174,7 @@ def render_sidebar():
             "Parallel Workers",
             min_value=1,
             max_value=8,
-            value=4,
+            value=8,
             help="Number of parallel threads for processing"
         )
         
@@ -189,8 +267,9 @@ def save_vector_store():
             st.warning("⚠️ No vector store to save. Please process documents first.")
     
     except Exception as e:
-        st.error(f"❌ Error saving vector store: {e}")
-        import traceback
+        error_msg = f"Error saving vector store: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        st.error(f"❌ {error_msg}")
         st.error(traceback.format_exc())
 
 
@@ -219,8 +298,9 @@ def load_vector_store():
                 st.info("📊 Loaded combined vector store with all document formats")
                     
             except Exception as e:
-                st.error(f"❌ Error loading vector store: {e}")
-                import traceback
+                error_msg = f"Error loading vector store: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                st.error(f"❌ {error_msg}")
                 st.error(traceback.format_exc())
         else:
             st.warning("⚠️ No vector stores found.")
@@ -253,7 +333,7 @@ def render_unified_upload_tab():
     # Single file uploader for all formats
     uploaded_files = st.file_uploader(
         "Upload files (PDF, Images, PPT, DOC/DOCX)",
-        type=['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp', 'ppt', 'pptx', 'doc', 'docx'],
+        type=['pdf', 'png', 'jpg', 'jpeg', 'ppt', 'pptx', 'doc', 'docx'],
         accept_multiple_files=True,
         help="Select one or more files of any supported format",
         key="unified_uploader"
@@ -323,8 +403,113 @@ Be detailed and capture all important information.""",
             process_all_files(pdf_files, image_files, ppt_files, doc_files, custom_prompt)
 
 
+def _save_files_to_disk(pdf_files, image_files, ppt_files, doc_files):
+    """Save all uploaded files to disk in parallel (I/O bound). 
+    Returns paths dict keyed by format type.
+    Must be called from the main thread since it reads Streamlit UploadedFile buffers."""
+    
+    paths = {'pdf': [], 'image': [], 'ppt': [], 'doc': []}
+    
+    # Save PDFs
+    if pdf_files:
+        temp_dir = "temp_pdfs"
+        os.makedirs(temp_dir, exist_ok=True)
+        for f in pdf_files:
+            fp = os.path.join(temp_dir, f.name)
+            with open(fp, "wb") as out:
+                out.write(f.getbuffer())
+            paths['pdf'].append(fp)
+    
+    # Save Images
+    if image_files:
+        temp_dir = "uploaded_images"
+        os.makedirs(temp_dir, exist_ok=True)
+        for f in image_files:
+            fp = save_uploaded_image(f, temp_dir)
+            paths['image'].append(fp)
+    
+    # Save PPTs
+    if ppt_files:
+        temp_dir = "temp_pdfs"
+        os.makedirs(temp_dir, exist_ok=True)
+        for f in ppt_files:
+            fp = os.path.join(temp_dir, f.name)
+            with open(fp, "wb") as out:
+                out.write(f.getbuffer())
+            paths['ppt'].append(fp)
+    
+    # Save DOCs
+    if doc_files:
+        temp_dir = "uploaded_documents"
+        os.makedirs(temp_dir, exist_ok=True)
+        for f in doc_files:
+            fp = save_uploaded_doc(f, temp_dir)
+            paths['doc'].append(fp)
+    
+    return paths
+
+
+def _ensure_processors_initialized():
+    """Pre-initialize all processors so threads don't race on lazy init."""
+    mw = st.session_state.max_workers
+    if st.session_state.processor is None:
+        st.session_state.processor = PDFProcessor(max_workers=mw)
+    if st.session_state.image_processor is None:
+        st.session_state.image_processor = ImageProcessor(max_workers=mw)
+    if st.session_state.ppt_processor is None:
+        st.session_state.ppt_processor = PPTProcessor(max_workers=mw)
+    if st.session_state.doc_processor is None:
+        st.session_state.doc_processor = DocProcessor(max_workers=mw)
+
+
+def _process_pdfs_worker(pdf_paths, processor, config):
+    """Thread-safe PDF processing worker (no Streamlit calls)."""
+    processed_data = processor.process_multiple_pdfs(pdf_paths)
+    all_documents = []
+    for pdf_data in processed_data:
+        documents = processor.create_chunks(
+            pdf_data,
+            chunk_size=config.chunk_size,
+            chunk_overlap=config.chunk_overlap,
+            splitter_type=config.splitter_type
+        )
+        all_documents.extend(documents)
+    return processed_data, all_documents
+
+
+def _process_images_worker(image_paths, image_processor, custom_prompt):
+    """Thread-safe image processing worker (no Streamlit calls)."""
+    image_data_list, image_documents = image_processor.process_and_create_documents(
+        image_paths, custom_prompt=custom_prompt
+    )
+    return image_data_list, image_documents
+
+
+def _process_ppts_worker(ppt_paths, ppt_processor, custom_prompt):
+    """Thread-safe PPT processing worker (no Streamlit calls)."""
+    ppt_data_list, ppt_documents = ppt_processor.process_and_create_documents(
+        ppt_paths, custom_prompt=custom_prompt
+    )
+    return ppt_data_list, ppt_documents
+
+
+def _process_docs_worker(doc_paths, doc_processor, custom_prompt):
+    """Thread-safe DOC processing worker (no Streamlit calls)."""
+    doc_data_list, doc_documents = doc_processor.process_and_create_documents(
+        doc_paths, custom_prompt=custom_prompt
+    )
+    return doc_data_list, doc_documents
+
+
 def process_all_files(pdf_files, image_files, ppt_files, doc_files, custom_prompt=None):
-    """Process all uploaded files and add to vector store"""
+    """Process all uploaded files IN PARALLEL and add to vector store.
+    
+    Parallelism strategy:
+    1. Save all files to disk first (main thread, reads Streamlit buffers)
+    2. Pre-initialize all processors (avoids thread-unsafe lazy init)
+    3. Launch one thread per format type — PDF, Image, PPT, DOC run concurrently
+    4. Collect results and batch-create the vector store with parallel embeddings
+    """
     
     all_new_documents = []
     total_files = len(pdf_files) + len(image_files) + len(ppt_files) + len(doc_files)
@@ -333,74 +518,170 @@ def process_all_files(pdf_files, image_files, ppt_files, doc_files, custom_promp
         st.warning("⚠️ No files to process")
         return
     
+    logger.info(f"Starting processing of {total_files} files: {len(pdf_files)} PDFs, {len(image_files)} images, {len(ppt_files)} PPTs, {len(doc_files)} DOCs")
+    
     # Create main progress tracking
     main_progress = st.progress(0)
     status_text = st.empty()
+    start_time = time.time()
     
     try:
-        current_step = 0
-        total_steps = (1 if pdf_files else 0) + (1 if image_files else 0) + (1 if ppt_files else 0) + (1 if doc_files else 0) + 1
+        # ── Step 1: Save all files to disk (main thread, I/O) ──
+        status_text.text("💾 Saving uploaded files to disk...")
+        logger.info("Step 1: Saving files to disk")
+        save_start = time.time()
+        file_paths = _save_files_to_disk(pdf_files, image_files, ppt_files, doc_files)
+        logger.info(f"Files saved in {time.time() - save_start:.2f}s")
+        main_progress.progress(0.05)
         
-        # Process PDFs
-        if pdf_files:
-            status_text.text(f"📄 Processing {len(pdf_files)} PDF file(s)...")
-            pdf_documents = process_pdfs_unified(pdf_files)
-            all_new_documents.extend(pdf_documents)
+        # ── Step 2: Pre-initialize all processors (main thread) ──
+        status_text.text("⚙️ Initializing processors...")
+        logger.info("Step 2: Initializing processors")
+        init_start = time.time()
+        _ensure_processors_initialized()
+        logger.info(f"Processors initialized in {time.time() - init_start:.2f}s")
+        main_progress.progress(0.10)
+        
+        # Grab references for thread-safe access (read-only, no mutation)
+        processor = st.session_state.processor
+        image_processor = st.session_state.image_processor
+        ppt_processor = st.session_state.ppt_processor
+        doc_processor = st.session_state.doc_processor
+        config = st.session_state.config
+        
+        # ── Step 3: Process ALL formats in parallel ──
+        status_text.text("🚀 Processing all file formats in parallel...")
+        logger.info("Step 3: Starting parallel processing of all formats")
+        processing_start = time.time()
+        
+        format_futures = {}
+        # Use one thread per format type for max concurrency
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="format") as executor:
+            if file_paths['pdf']:
+                logger.info(f"Submitting {len(file_paths['pdf'])} PDFs for processing")
+                format_futures['pdf'] = executor.submit(
+                    _process_pdfs_worker, file_paths['pdf'], processor, config
+                )
+            if file_paths['image']:
+                logger.info(f"Submitting {len(file_paths['image'])} images for processing")
+                format_futures['image'] = executor.submit(
+                    _process_images_worker, file_paths['image'], image_processor, custom_prompt
+                )
+            if file_paths['ppt']:
+                logger.info(f"Submitting {len(file_paths['ppt'])} PPTs for processing")
+                format_futures['ppt'] = executor.submit(
+                    _process_ppts_worker, file_paths['ppt'], ppt_processor, custom_prompt
+                )
+            if file_paths['doc']:
+                logger.info(f"Submitting {len(file_paths['doc'])} DOCs for processing")
+                format_futures['doc'] = executor.submit(
+                    _process_docs_worker, file_paths['doc'], doc_processor, custom_prompt
+                )
+            
+            # Track completion as formats finish
+            completed = 0
+            total_formats = len(format_futures)
+            format_labels = {'pdf': '📄 PDF', 'image': '🖼️ Image', 'ppt': '📊 PPT', 'doc': '📝 DOC'}
+            
+            for future in as_completed(format_futures.values()):
+                completed += 1
+                # Find which format just completed
+                fmt_name = next(k for k, v in format_futures.items() if v is future)
+                elapsed = time.time() - start_time
+                
+                # Check for errors
+                try:
+                    future.result()
+                    logger.info(f"Format {fmt_name} completed successfully")
+                except Exception as e:
+                    logger.error(f"Format {fmt_name} failed: {str(e)}", exc_info=True)
+                    raise
+                
+                status_text.text(
+                    f"✅ {format_labels[fmt_name]} done  |  "
+                    f"{completed}/{total_formats} formats complete  |  "
+                    f"{elapsed:.1f}s elapsed"
+                )
+                main_progress.progress(0.10 + 0.70 * (completed / total_formats))
+        
+        processing_time = time.time() - processing_start
+        logger.info(f"All formats processed in {processing_time:.2f}s")
+        
+        # ── Step 4: Collect results from all futures ──
+        status_text.text("📦 Collecting processed documents...")
+        logger.info("Step 4: Collecting results from all format processors")
+        
+        if 'pdf' in format_futures:
+            processed_data, pdf_documents = format_futures['pdf'].result()
+            st.session_state.processed_pdfs.extend(processed_data)
             st.session_state.pdf_documents.extend(pdf_documents)
-            current_step += 1
-            main_progress.progress(current_step / total_steps)
+            all_new_documents.extend(pdf_documents)
+            logger.info(f"Collected {len(pdf_documents)} documents from PDF processing")
         
-        # Process Images
-        if image_files:
-            status_text.text(f"🖼️ Processing {len(image_files)} image file(s)...")
-            image_documents = process_images_unified(image_files, custom_prompt)
-            all_new_documents.extend(image_documents)
+        if 'image' in format_futures:
+            image_data_list, image_documents = format_futures['image'].result()
+            st.session_state.processed_images.extend(image_data_list)
             st.session_state.image_documents.extend(image_documents)
-            current_step += 1
-            main_progress.progress(current_step / total_steps)
+            all_new_documents.extend(image_documents)
+            logger.info(f"Collected {len(image_documents)} documents from image processing")
         
-        # Process PowerPoints
-        if ppt_files:
-            status_text.text(f"📊 Processing {len(ppt_files)} PowerPoint file(s)...")
-            ppt_documents = process_ppts_unified(ppt_files, custom_prompt)
-            all_new_documents.extend(ppt_documents)
+        if 'ppt' in format_futures:
+            ppt_data_list, ppt_documents = format_futures['ppt'].result()
+            st.session_state.processed_ppts.extend(ppt_data_list)
             st.session_state.ppt_documents.extend(ppt_documents)
-            current_step += 1
-            main_progress.progress(current_step / total_steps)
+            all_new_documents.extend(ppt_documents)
+            logger.info(f"Collected {len(ppt_documents)} documents from PPT processing")
         
-        # Process DOCs
-        if doc_files:
-            status_text.text(f"📝 Processing {len(doc_files)} DOC/DOCX file(s)...")
-            doc_documents = process_docs_unified(doc_files, custom_prompt)
-            all_new_documents.extend(doc_documents)
+        if 'doc' in format_futures:
+            doc_data_list, doc_documents = format_futures['doc'].result()
+            st.session_state.processed_docs.extend(doc_data_list)
             st.session_state.doc_documents.extend(doc_documents)
-            current_step += 1
-            main_progress.progress(current_step / total_steps)
+            all_new_documents.extend(doc_documents)
+            logger.info(f"Collected {len(doc_documents)} documents from DOC processing")
         
-        # Add to all_documents
+        main_progress.progress(0.85)
+        
+        # ── Step 5: Add to all_documents ──
         st.session_state.all_documents.extend(all_new_documents)
+        logger.info(f"Total documents in memory: {len(st.session_state.all_documents)}")
         
-        # Create or update vector store
-        status_text.text("🔢 Creating embeddings and updating vector store...")
+        # ── Step 6: Create or update vector store (parallel embeddings inside) ──
+        status_text.text(f"🔢 Creating embeddings for {len(all_new_documents)} documents (parallel batches)...")
+        logger.info(f"Step 6: Creating/updating vector store with {len(all_new_documents)} new documents")
+        embedding_start = time.time()
         
         if st.session_state.vector_store_manager is None:
-            # Create new vector store
             st.session_state.vector_store_manager = VectorStoreManager(
                 max_workers=st.session_state.max_workers,
                 index_type=st.session_state.config.index_type
             )
             st.session_state.vector_store_manager.create_vector_store(all_new_documents)
+            logger.info("Created new vector store")
         else:
-            # Append to existing vector store
             st.session_state.vector_store_manager.add_documents(all_new_documents)
+            logger.info("Added documents to existing vector store")
         
-        current_step += 1
+        embedding_time = time.time() - embedding_start
+        logger.info(f"Vector store operations completed in {embedding_time:.2f}s")
+        
         main_progress.progress(1.0)
-        status_text.text("✅ Processing complete!")
+        total_time = time.time() - start_time
+        status_text.text(f"✅ Processing complete in {total_time:.1f}s!")
+        
+        logger.info(f"="*60)
+        logger.info(f"PROCESSING COMPLETED SUCCESSFULLY")
+        logger.info(f"Total time: {total_time:.2f}s")
+        logger.info(f"Processing time breakdown:")
+        logger.info(f"  - File saving: {save_start and (time.time() - save_start):.2f}s")
+        logger.info(f"  - Processor init: {init_start and (time.time() - init_start):.2f}s")
+        logger.info(f"  - Format processing: {processing_time:.2f}s")
+        logger.info(f"  - Vector store: {embedding_time:.2f}s")
+        logger.info(f"Documents created: {len(all_new_documents)}")
+        logger.info(f"="*60)
         
         # Show summary
         st.success(f"""
-        **✅ Processing Summary:**
+        **✅ Processing Summary (completed in {total_time:.1f}s):**
         - Total files processed: {total_files}
         - Documents created: {len(all_new_documents)}
         - PDFs: {len(pdf_files)} files
@@ -411,14 +692,17 @@ def process_all_files(pdf_files, image_files, ppt_files, doc_files, custom_promp
         **📊 Vector Store Status:**
         - Total documents in store: {len(st.session_state.all_documents)}
         - New documents added: {len(all_new_documents)}
+        
+        **⚡ Parallelism: All {len(format_futures)} format(s) processed concurrently**
         """)
         
         # Display statistics
         render_statistics()
         
     except Exception as e:
-        st.error(f"❌ Error processing files: {e}")
-        import traceback
+        error_msg = f"Error processing files: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        st.error(f"❌ {error_msg}")
         st.error(traceback.format_exc())
     
     finally:
@@ -427,7 +711,7 @@ def process_all_files(pdf_files, image_files, ppt_files, doc_files, custom_promp
 
 
 def process_pdfs_unified(pdf_files):
-    """Process PDF files and return documents"""
+    """Process PDF files and return documents (used by individual PDF tab)"""
     temp_dir = "temp_pdfs"
     os.makedirs(temp_dir, exist_ok=True)
     
@@ -441,24 +725,16 @@ def process_pdfs_unified(pdf_files):
     if st.session_state.processor is None:
         st.session_state.processor = PDFProcessor(max_workers=st.session_state.max_workers)
     
-    processed_data = st.session_state.processor.process_multiple_pdfs(pdf_paths)
+    processed_data, all_documents = _process_pdfs_worker(
+        pdf_paths, st.session_state.processor, st.session_state.config
+    )
     st.session_state.processed_pdfs.extend(processed_data)
-    
-    all_documents = []
-    for pdf_data in processed_data:
-        documents = st.session_state.processor.create_chunks(
-            pdf_data,
-            chunk_size=st.session_state.config.chunk_size,
-            chunk_overlap=st.session_state.config.chunk_overlap,
-            splitter_type=st.session_state.config.splitter_type
-        )
-        all_documents.extend(documents)
     
     return all_documents
 
 
 def process_images_unified(image_files, custom_prompt=None):
-    """Process image files and return documents"""
+    """Process image files and return documents (used by individual Image tab)"""
     temp_dir = "uploaded_images"
     os.makedirs(temp_dir, exist_ok=True)
     
@@ -470,9 +746,8 @@ def process_images_unified(image_files, custom_prompt=None):
     if st.session_state.image_processor is None:
         st.session_state.image_processor = ImageProcessor(max_workers=st.session_state.max_workers)
     
-    image_data_list, image_documents = st.session_state.image_processor.process_and_create_documents(
-        image_paths,
-        custom_prompt=custom_prompt
+    image_data_list, image_documents = _process_images_worker(
+        image_paths, st.session_state.image_processor, custom_prompt
     )
     
     st.session_state.processed_images.extend(image_data_list)
@@ -480,7 +755,7 @@ def process_images_unified(image_files, custom_prompt=None):
 
 
 def process_ppts_unified(ppt_files, custom_prompt=None):
-    """Process PowerPoint files and return documents"""
+    """Process PowerPoint files and return documents (used by individual PPT tab)"""
     temp_dir = "temp_pdfs"
     os.makedirs(temp_dir, exist_ok=True)
     
@@ -494,9 +769,8 @@ def process_ppts_unified(ppt_files, custom_prompt=None):
     if st.session_state.ppt_processor is None:
         st.session_state.ppt_processor = PPTProcessor(max_workers=st.session_state.max_workers)
     
-    ppt_data_list, ppt_documents = st.session_state.ppt_processor.process_and_create_documents(
-        ppt_paths,
-        custom_prompt=custom_prompt
+    ppt_data_list, ppt_documents = _process_ppts_worker(
+        ppt_paths, st.session_state.ppt_processor, custom_prompt
     )
     
     st.session_state.processed_ppts.extend(ppt_data_list)
@@ -504,7 +778,7 @@ def process_ppts_unified(ppt_files, custom_prompt=None):
 
 
 def process_docs_unified(doc_files, custom_prompt=None):
-    """Process DOC/DOCX files and return documents"""
+    """Process DOC/DOCX files and return documents (used by individual DOC tab)"""
     temp_dir = "uploaded_documents"
     os.makedirs(temp_dir, exist_ok=True)
     
@@ -516,9 +790,8 @@ def process_docs_unified(doc_files, custom_prompt=None):
     if st.session_state.doc_processor is None:
         st.session_state.doc_processor = DocProcessor(max_workers=st.session_state.max_workers)
     
-    doc_data_list, doc_documents = st.session_state.doc_processor.process_and_create_documents(
-        doc_paths,
-        custom_prompt=custom_prompt
+    doc_data_list, doc_documents = _process_docs_worker(
+        doc_paths, st.session_state.doc_processor, custom_prompt
     )
     
     st.session_state.processed_docs.extend(doc_data_list)
@@ -628,8 +901,9 @@ def process_pdfs(uploaded_files):
         render_statistics()
         
     except Exception as e:
-        st.error(f"❌ Error processing PDFs: {e}")
-        import traceback
+        error_msg = f"Error processing PDFs: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        st.error(f"❌ {error_msg}")
         st.error(traceback.format_exc())
     
     finally:
@@ -756,8 +1030,9 @@ def process_images(uploaded_images, custom_prompt=None):
         render_image_statistics(image_data_list)
         
     except Exception as e:
-        st.error(f"❌ Error processing images: {e}")
-        import traceback
+        error_msg = f"Error processing images: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        st.error(f"❌ {error_msg}")
         st.error(traceback.format_exc())
     
     finally:
@@ -925,8 +1200,9 @@ def process_ppts(uploaded_ppts, custom_prompt=None):
         render_ppt_statistics(ppt_data_list)
         
     except Exception as e:
-        st.error(f"❌ Error processing PowerPoints: {e}")
-        import traceback
+        error_msg = f"Error processing PowerPoints: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        st.error(f"❌ {error_msg}")
         st.error(traceback.format_exc())
     
     finally:
@@ -1100,8 +1376,9 @@ def process_docs(uploaded_docs, custom_prompt=None):
         render_doc_statistics(doc_data_list)
         
     except Exception as e:
-        st.error(f"❌ Error processing DOC/DOCX files: {e}")
-        import traceback
+        error_msg = f"Error processing DOC/DOCX files: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        st.error(f"❌ {error_msg}")
         st.error(traceback.format_exc())
     
     finally:
@@ -1259,8 +1536,9 @@ def perform_search(query: str):
             st.success(f"✅ Found {len(results)} results")
     
     except Exception as e:
-        st.error(f"❌ Search error: {e}")
-        import traceback
+        error_msg = f"Search error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        st.error(f"❌ {error_msg}")
         st.error(traceback.format_exc())
 
 
@@ -1636,6 +1914,212 @@ def render_metadata_tab():
                 st.json(metadata)
 
 
+def render_rag_chat_tab():
+    """Render RAG Chat tab — generation powered by retrieval context."""
+
+    st.header("💬 RAG Chat — Ask Questions About Your Documents")
+
+    if not st.session_state.vector_store_manager or not st.session_state.vector_store_manager.vector_store:
+        st.warning("⚠️ Please upload and process documents first, or load a saved vector store.")
+        return
+
+    # ── Generation parameters (horizontal bar) ──
+    st.subheader("⚙️ Generation Settings")
+    param_col1, param_col2 = st.columns(2)
+
+    with param_col1:
+        rag_k = st.slider(
+            "Top-K Retrieved Chunks",
+            min_value=1,
+            max_value=30,
+            value=5,
+            step=1,
+            help="Number of most-relevant chunks to feed as context to GPT-5",
+            key="rag_k_slider"
+        )
+
+    with param_col2:
+        show_sources = st.toggle(
+            "Show Retrieved Sources",
+            value=True,
+            help="Display the retrieved chunks that were used as context",
+            key="rag_show_sources"
+        )
+
+    st.divider()
+
+    # ── Chat history display ──
+    chat_container = st.container()
+    with chat_container:
+        for msg_idx, msg in enumerate(st.session_state.chat_messages):
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                # Show sources for assistant messages
+                if msg["role"] == "assistant" and msg.get("sources") and show_sources:
+                    with st.expander(f"📚 Retrieved Sources ({len(msg['sources'])} chunks)", expanded=False):
+                        for i, src in enumerate(msg["sources"], 1):
+                            _render_source_card(i, src, msg_idx)
+
+    # ── Chat input ──
+    if user_query := st.chat_input("Ask a question about your documents..."):
+        # Display user message
+        st.session_state.chat_messages.append({"role": "user", "content": user_query})
+        with st.chat_message("user"):
+            st.markdown(user_query)
+
+        # Generate answer
+        with st.chat_message("assistant"):
+            with st.spinner("🔍 Retrieving relevant context & generating answer..."):
+                sources, answer = _rag_generate(user_query, rag_k)
+
+            st.markdown(answer)
+
+            if sources and show_sources:
+                with st.expander(f"📚 Retrieved Sources ({len(sources)} chunks)", expanded=False):
+                    for i, src in enumerate(sources, 1):
+                        _render_source_card(i, src, len(st.session_state.chat_messages))
+
+        # Store assistant message
+        st.session_state.chat_messages.append({
+            "role": "assistant",
+            "content": answer,
+            "sources": sources if show_sources else []
+        })
+
+    # ── Clear chat button ──
+    if st.session_state.chat_messages:
+        if st.button("🗑️ Clear Chat History", key="clear_chat"):
+            st.session_state.chat_messages = []
+            st.rerun()
+
+
+def _rag_generate(query: str, k: int):
+    """Retrieve relevant chunks and generate an answer with GPT-5.
+    Includes retry logic for robustness.
+
+    Returns:
+        (sources_list, answer_text)
+    """
+    @retry_with_exponential_backoff(max_retries=3)
+    def call_gpt5_with_retry(messages):
+        return st.session_state.rag_client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=messages,
+        )
+    
+    # Step 1 — Retrieve
+    try:
+        results = st.session_state.vector_store_manager.similarity_search(
+            query=query,
+            k=k,
+            return_scores=True
+        )
+    except Exception as e:
+        logger.error(f"Retrieval failed: {str(e)}", exc_info=True)
+        return [], f"Retrieval error: {str(e)}"
+
+    # Build context + source cards
+    context_parts = []
+    sources = []
+    for rank, (doc, score) in enumerate(results, 1):
+        meta = doc.metadata
+
+        # Determine human-friendly source label
+        source_label = (
+            meta.get("pdf_name")
+            or meta.get("image_name")
+            or meta.get("ppt_name")
+            or meta.get("doc_name")
+            or "Unknown"
+        )
+        content_type = (
+            meta.get("content_type")
+            or meta.get("chunk_type")
+            or "text"
+        )
+
+        context_parts.append(
+            f"[Source {rank} | {source_label} | {content_type}]\n{doc.page_content}"
+        )
+        sources.append({
+            "rank": rank,
+            "score": float(score),
+            "source": source_label,
+            "content_type": content_type,
+            "page": meta.get("source_page") or meta.get("page_number") or meta.get("slide_number"),
+            "content": doc.page_content[:500],
+            "metadata": meta
+        })
+
+    context_block = "\n\n---\n\n".join(context_parts)
+
+    # Step 2 — Build messages
+    system_prompt = (
+        "You are an expert document assistant. Answer the user's question accurately "
+        "based ONLY on the retrieved context below. "
+        "If the context does not contain enough information, say so honestly. "
+        "Cite the source numbers (e.g. [Source 1]) when you use information from a specific chunk.\n\n"
+        f"--- RETRIEVED CONTEXT ---\n{context_block}\n--- END CONTEXT ---"
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+    ]
+
+    # Include recent chat history for conversational continuity (last 10 turns)
+    history_window = st.session_state.chat_messages[-10:]
+    for msg in history_window:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+
+    # Current user query (always last)
+    messages.append({"role": "user", "content": query})
+
+    # Step 3 — Call GPT-5
+    try:
+        response = st.session_state.rag_client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=messages,
+        )
+        answer = response.choices[0].message.content.strip()
+    except Exception as e:
+        answer = f"❌ Generation error: {e}"
+
+    return sources, answer
+
+
+def _render_source_card(rank: int, src: dict, msg_idx: int):
+    """Render a single retrieved-source card inside an expander."""
+    type_icons = {
+        "text": "📄", "table": "📊", "image": "🖼️",
+        "ppt_slide": "📊", "doc_page": "📝"
+    }
+    icon = type_icons.get(src["content_type"], "📄")
+    page_info = f" | Page/Slide {src['page']}" if src.get("page") else ""
+
+    st.markdown(
+        f"**{icon} Source {rank}** — *{src['source']}*{page_info}  "
+        f"  Score: `{src['score']:.4f}`"
+    )
+    st.text_area(
+        f"Content (Source {rank})",
+        value=src["content"],
+        height=100,
+        key=f"rag_src_msg{msg_idx}_rank{rank}_{hash(src['content'][:50])}",
+        label_visibility="collapsed",
+        disabled=True
+    )
+
+    # Show image/slide/page preview if available
+    meta = src.get("metadata", {})
+    preview_path = (
+        meta.get("image_path")
+        or meta.get("slide_image_path")
+        or meta.get("page_image_path")
+    )
+    if preview_path and os.path.exists(preview_path):
+        st.image(preview_path, width=300, caption=f"Source {rank} preview")
+
+
 def main():
     """Main application"""
     
@@ -1648,18 +2132,27 @@ def main():
     render_sidebar()
     
     # Main tabs
-    tabs = st.tabs([" Upload Documents", " Retrieval", " Evaluation", " Metadata"])
+    tabs = st.tabs([
+        " Upload Documents",
+        " 💬 RAG Chat",
+        " Retrieval",
+        " Evaluation",
+        " Metadata"
+    ])
     
     with tabs[0]:
         render_unified_upload_tab()
     
     with tabs[1]:
-        render_retrieval_tab()
+        render_rag_chat_tab()
     
     with tabs[2]:
-        render_evaluation_tab()
+        render_retrieval_tab()
     
     with tabs[3]:
+        render_evaluation_tab()
+    
+    with tabs[4]:
         render_metadata_tab()
     
     # Footer

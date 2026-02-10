@@ -38,7 +38,7 @@ def supported_doc_formats() -> List[str]:
 class DocProcessor:
     """Process DOC/DOCX documents by converting to images and generating descriptions"""
     
-    def __init__(self, max_workers: int = 4):
+    def __init__(self, max_workers: int = 8):
         """
         Initialize DOC processor
         
@@ -124,15 +124,7 @@ class DocProcessor:
         import base64
         
         # Default prompt for document pages
-        default_prompt = """Analyze this document page image and provide a comprehensive description including:
-1. Main headings or titles
-2. Key text content and paragraphs
-3. Any tables, charts, or diagrams present
-4. Lists or bullet points
-5. Overall structure and layout
-6. Any images or visual elements
-
-Be detailed and capture all important information from the document page."""
+        default_prompt = "Describe this document page in 2 to 3 lines. Include main headings/titles, key text content, and any tables, charts, or diagrams present."
         
         prompt = custom_prompt if custom_prompt else default_prompt
         
@@ -196,18 +188,16 @@ Be detailed and capture all important information from the document page."""
         os.makedirs(image_dir, exist_ok=True)
         image_paths = self.convert_pdf_to_images(pdf_path, image_dir)
         
-        # Step 3: Generate descriptions for each page
-        pages = []
-        for i, image_path in enumerate(image_paths):
+        # Step 3: Generate descriptions for each page IN PARALLEL
+        pages = [None] * len(image_paths)
+        
+        def _describe_page(i, image_path):
             description = self.get_image_description(image_path, custom_prompt)
-            
-            # Get image metadata
             with Image.open(image_path) as img:
                 width, height = img.size
                 format_name = img.format
                 file_size = os.path.getsize(image_path)
-            
-            page_data = {
+            return i, {
                 'page_number': i + 1,
                 'image_path': image_path,
                 'description': description,
@@ -217,8 +207,22 @@ Be detailed and capture all important information from the document page."""
                 'image_resolution': f"{width}x{height}",
                 'image_size_bytes': file_size
             }
-            
-            pages.append(page_data)
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {
+                executor.submit(_describe_page, i, ip): i
+                for i, ip in enumerate(image_paths)
+            }
+            for future in as_completed(futures):
+                try:
+                    idx, page_data = future.result()
+                    pages[idx] = page_data
+                except Exception as e:
+                    idx = futures[future]
+                    print(f"Error processing page {idx+1}: {e}")
+        
+        # Remove any None entries from failed pages
+        pages = [p for p in pages if p is not None]
         
         return {
             'doc_name': doc_name,

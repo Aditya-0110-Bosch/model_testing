@@ -44,7 +44,7 @@ class ImageMetadata:
 class ImageProcessor:
     """Process images and generate descriptions using GPT-5 Vision"""
     
-    def __init__(self, max_workers: int = 4):
+    def __init__(self, max_workers: int = 8):
         """
         Initialize the Image Processor
         
@@ -136,14 +136,7 @@ class ImageProcessor:
             
             # Default prompt if none provided
             if not custom_prompt:
-                custom_prompt = """Analyze this image and provide a detailed description including:
-1. Main subject/objects in the image
-2. Visual characteristics (colors, composition, style)
-3. Context and setting
-4. Any text or labels visible
-5. Overall purpose or message of the image
-
-Be descriptive and specific."""
+                custom_prompt = "Describe this image in 2 to 3 lines. Include the main subject/objects, visual characteristics, and any visible text or labels."
             
             print(f"Calling GPT-5 Vision API with model: {VISION_MODEL}")
             

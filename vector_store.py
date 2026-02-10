@@ -30,7 +30,7 @@ class VectorStoreManager:
     def __init__(
         self,
         embedding_model: str = EMBEDDING_MODEL,
-        max_workers: int = 4,
+        max_workers: int = 8,
         index_type: str = "cosine"  # 'cosine', 'l2', 'ip' (inner product)
     ):
         self.max_workers = max_workers
@@ -49,32 +49,46 @@ class VectorStoreManager:
         self.dimension: Optional[int] = None
     
     def embed_documents_parallel(self, texts: List[str]) -> List[List[float]]:
-        """Embed documents in parallel for better performance"""
+        """Embed documents in parallel for better performance.
+        Uses indexed futures to preserve document order."""
         
-        # For large batches, split into chunks
-        batch_size = 100
-        all_embeddings = []
+        # Split into batches for parallel embedding
+        batch_size = 50  # Smaller batches = more parallelism with API
+        batches = []
+        for i in range(0, len(texts), batch_size):
+            batches.append((i, texts[i:i+batch_size]))
         
-        def embed_batch(batch_texts):
-            return self.embeddings.embed_documents(batch_texts)
+        # Pre-allocate results list to maintain order
+        all_embeddings: List[Optional[List[List[float]]]] = [None] * len(batches)
         
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = []
-            for i in range(0, len(texts), batch_size):
-                batch = texts[i:i+batch_size]
-                futures.append(executor.submit(embed_batch, batch))
+        def embed_batch(batch_index: int, batch_texts: List[str]):
+            return batch_index, self.embeddings.embed_documents(batch_texts)
+        
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(batches))) as executor:
+            futures = {
+                executor.submit(embed_batch, idx, batch): idx
+                for idx, (_, batch) in enumerate(batches)
+            }
             
             for future in as_completed(futures):
                 try:
-                    embeddings = future.result()
-                    all_embeddings.extend(embeddings)
+                    batch_idx, embeddings = future.result()
+                    all_embeddings[batch_idx] = embeddings
                 except Exception as e:
-                    print(f"Error embedding batch: {e}")
-                    # Add zero vectors for failed embeddings
+                    batch_idx = futures[future]
+                    print(f"Error embedding batch {batch_idx}: {e}")
+                    # Add zero vectors for failed embeddings, preserving order
+                    batch_len = len(batches[batch_idx][1])
                     if self.dimension:
-                        all_embeddings.extend([[0.0] * self.dimension] * batch_size)
+                        all_embeddings[batch_idx] = [[0.0] * self.dimension] * batch_len
         
-        return all_embeddings
+        # Flatten ordered results
+        flat_embeddings = []
+        for batch_result in all_embeddings:
+            if batch_result is not None:
+                flat_embeddings.extend(batch_result)
+        
+        return flat_embeddings
     
     def create_vector_store(
         self,
@@ -92,8 +106,8 @@ class VectorStoreManager:
         texts = [doc.page_content for doc in documents]
         metadatas = [doc.metadata for doc in documents]
         
-        # Generate embeddings
-        if use_parallel and len(documents) > 50:
+        # Generate embeddings — always use parallel for 10+ docs
+        if use_parallel and len(documents) > 10:
             # Test embedding to get dimension
             test_embedding = self.embeddings.embed_query(texts[0])
             self.dimension = len(test_embedding)
